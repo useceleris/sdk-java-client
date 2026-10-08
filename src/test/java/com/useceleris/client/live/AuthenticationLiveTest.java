@@ -70,7 +70,7 @@ final class AuthenticationLiveTest {
         "invalid signature",
         "unknown client",
         "expired",
-        "an hour old",
+        "59 minutes old",
         "future",
         "other channel"
       })
@@ -81,7 +81,7 @@ final class AuthenticationLiveTest {
           case "invalid signature" -> sign(clientId(), "wrong-secret", claims());
           case "unknown client" -> sign("no-such-client", signingSecret(), claims());
           case "expired" -> sign(claims().withTimestamp(now - Duration.ofSeconds(61).toMillis()));
-          case "an hour old" ->
+          case "59 minutes old" ->
               sign(claims().withTimestamp(now - Duration.ofMinutes(59).toMillis()));
           case "future" -> sign(claims().withTimestamp(now + Duration.ofMinutes(5).toMillis()));
           case "other channel" -> sign(claims().withChannelReferences("some-other-channel"));

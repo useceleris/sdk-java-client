@@ -5,7 +5,7 @@
 #   make check                 the unit and integration suites, with analysis
 #   make format                apply google-java-format
 #   make live                  the acceptance suites against a real Celeris stack, from .env
-#   make version VERSION=x.y.z set the project version
+#   make version VERSION=x.y.z set the project version, which generated message ids name
 #   make install               install the artifact in ~/.m2, for the server build
 #   make release-check         build and sign the release artifacts, without upload
 #   make publish               sign and upload a release version to Maven Central
@@ -31,6 +31,7 @@ live:
 version:
 	@test -n "$(VERSION)" || { echo "Usage: make version VERSION=x.y.z"; exit 1; }
 	$(MVN) $(VERSIONS_PLUGIN):set -DnewVersion=$(VERSION) -DgenerateBackupPoms=false
+	perl -pi -e 's/(SDK_VERSION = ")[^"]*/$${1}$(VERSION)/' src/main/java/com/useceleris/client/Constants.java
 
 install:
 	$(MVN) install -DskipTests

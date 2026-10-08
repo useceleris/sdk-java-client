@@ -53,6 +53,12 @@ final class Constants {
   // publishers, so they are random and long enough never to collide.
   static final int MESSAGE_ID_RANDOM_BYTES = 16;
 
+  // Every generated message id names the SDK that made it (RESEND-01). The version is this
+  // artifact's; a test keeps it equal to pom.xml, and `make version` sets both.
+  static final String SDK_LANGUAGE = "java";
+
+  static final String SDK_VERSION = "0.1.0-SNAPSHOT";
+
   // Decoder bounds. These limit parsing work and recursion, not message size; no legitimate server
   // message approaches them.
   static final int MAXIMUM_FRAGMENTS = 4096;

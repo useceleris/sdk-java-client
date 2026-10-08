@@ -199,7 +199,10 @@ class MessagingTest {
     List<String> commands = runtime.socket().commands();
     assertEquals(2, commands.size());
     assertTrue(
-        commands.get(0).matches("@PUB\n\\$7\ndefault\n\\$32\n[0-9a-f]{32}\n\\$2\nhi\n"),
+        commands
+            .get(0)
+            .matches(
+                "@PUB\n\\$7\ndefault\n\\$59\nmsg__java_v0\\.1\\.0_SNAPSHOT__[0-9a-f]{32}\n\\$2\nhi\n"),
         commands.get(0));
     assertEquals("@PUB\n$4\nchat\n$3\nm-1\n$2\nyo\n", commands.get(1));
   } // end method publishCompletesOnLocalAcceptance

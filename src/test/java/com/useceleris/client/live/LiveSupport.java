@@ -60,10 +60,11 @@ import org.junit.jupiter.api.extension.ExtensionContext;
  */
 final class LiveSupport implements BeforeEachCallback, AfterEachCallback {
   /**
-   * The SDK gives every publish its own id, which the server delivers as is (RESEND-01): 16 random
-   * bytes, hex-encoded.
+   * The SDK gives every publish its own id, which the server delivers as is (RESEND-01):
+   * msg__java_v&lt;version&gt;__, then 16 random bytes as hex.
    */
-  static final Pattern GENERATED_MESSAGE_ID = Pattern.compile("[0-9a-f]{32}");
+  static final Pattern GENERATED_MESSAGE_ID =
+      Pattern.compile("msg__java_v[0-9]+\\.[0-9]+\\.[0-9]+[A-Za-z0-9._]*__[0-9a-f]{32}");
 
   static final Duration DELIVERY_TIMEOUT = Duration.ofSeconds(15);
 

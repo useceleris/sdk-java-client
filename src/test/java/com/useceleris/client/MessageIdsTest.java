@@ -19,7 +19,10 @@ class MessageIdsTest {
   void namesTheSdkAndItsVersionThenThirtyTwoHexDigits() {
     String identifier = MessageIds.generate();
 
-    assertTrue(identifier.matches("msg__java_v0\\.1\\.0_SNAPSHOT__[0-9a-f]{32}"), identifier);
+    String prefix = MessageIds.prefix("java", Constants.SDK_VERSION);
+
+    assertTrue(identifier.startsWith(prefix), identifier);
+    assertTrue(identifier.substring(prefix.length()).matches("[0-9a-f]{32}"), identifier);
   } // end method namesTheSdkAndItsVersionThenThirtyTwoHexDigits
 
   @Test
@@ -80,10 +83,15 @@ class MessageIdsTest {
 
     assertTrue(published.isDone() && !published.isCompletedExceptionally());
     String frame = runtime.socket().commands().get(0);
+    String prefix = MessageIds.prefix("java", Constants.SDK_VERSION);
 
     assertTrue(
         frame.matches(
-            "@PUB\n\\$4\nchat\n\\$59\nmsg__java_v0\\.1\\.0_SNAPSHOT__[0-9a-f]{32}\n\\$2\nhi\n"),
+            "@PUB\n\\$4\nchat\n\\$"
+                + (prefix.length() + 32)
+                + "\n"
+                + Pattern.quote(prefix)
+                + "[0-9a-f]{32}\n\\$2\nhi\n"),
         frame);
   } // end method sendsAGeneratedIdAsABulkString
 

@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class MessagingTest {
@@ -198,11 +199,16 @@ class MessagingTest {
     assertSucceeded(named);
     List<String> commands = runtime.socket().commands();
     assertEquals(2, commands.size());
+    String prefix = MessageIds.prefix("java", Constants.SDK_VERSION);
     assertTrue(
         commands
             .get(0)
             .matches(
-                "@PUB\n\\$7\ndefault\n\\$59\nmsg__java_v0\\.1\\.0_SNAPSHOT__[0-9a-f]{32}\n\\$2\nhi\n"),
+                "@PUB\n\\$7\ndefault\n\\$"
+                    + (prefix.length() + 32)
+                    + "\n"
+                    + Pattern.quote(prefix)
+                    + "[0-9a-f]{32}\n\\$2\nhi\n"),
         commands.get(0));
     assertEquals("@PUB\n$4\nchat\n$3\nm-1\n$2\nyo\n", commands.get(1));
   } // end method publishCompletesOnLocalAcceptance

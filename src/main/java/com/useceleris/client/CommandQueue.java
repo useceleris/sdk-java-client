@@ -419,9 +419,9 @@ final class CommandQueue {
   private record PendingInterest(InterestKind kind, String segmentId) {}
 
   /**
-   * Finds the first subscription change with no earlier publish to its segment still queued:
-   * publishing joins the segment, so a change has to follow the publishes queued before it for the
-   * segment to end up as asked.
+   * Finds the first subscription change with no earlier publish to its segment still queued: the
+   * commands for one segment keep their call order, so a change follows the publishes queued before
+   * it (RESEND-01).
    */
   private @Nullable PendingInterest nextReadyInterest() {
     for (InterestKind kind : InterestKind.values()) {

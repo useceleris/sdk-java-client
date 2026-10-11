@@ -135,15 +135,16 @@ subscription.cancel();
 listener.close();
 ```
 
-`subscribe()` registers interest: the first interest subscribes the segment, the last `cancel()` unsubscribes it, and subscriptions are restored after every reconnect. The protocol has no acknowledgement, so a denial arrives later through `onError`. The default segment is joined on connect and never needs a subscription. Each listener receives its own copy of the payload, and each message id is delivered once within the deduplication window.
+`subscribe()` registers interest: the first interest subscribes the segment, the last `cancel()` unsubscribes it, and subscriptions are restored after every reconnect. The protocol has no acknowledgement, so a denial arrives later through `onError`. A subscription needs read access to the segment, and a publish needs write access. The default segment is joined on connect and never needs a subscription. Each listener receives its own copy of the payload, and each message id is delivered once within the deduplication window.
 
 The server membership of the connection controls what it receives on a segment. A listener does not control it:
 
-- When you hold `subscribe()`, the segment sends messages to you. A listener alone receives nothing, unless the connection published to the segment.
-- A publish joins the connection to the segment. With read and write access, the connection then receives messages. With write access only, it receives nothing. With read access only, the server does not accept the publish, so you must call `subscribe()`.
-- The last `cancel()` stops the membership, also a membership from a publish. A presence subscription does not join a segment and does not keep a segment.
+- When you hold `subscribe()`, the segment sends messages to you. A listener alone receives nothing.
+- A publish does not join the segment. To receive messages from a segment, your own echo included, call `subscribe()`.
+- With write access only, the connection can publish, and the server refuses `subscribe()` with a `PermissionDeniedError`. With read access only, the connection can subscribe, and the server refuses the publish.
+- The last `cancel()` stops the membership. A presence subscription does not join a segment and does not keep a segment.
 - `"default"` always sends messages to you.
-- After a reconnect, the SDK subscribes again only to the segments that you hold a subscription for. A join from a publish does not continue. Call `subscribe()` for a segment that must continue to send messages to you.
+- After a reconnect, the SDK subscribes again to the segments that you hold a subscription for.
 - Listeners and subscriptions operate independently. When you remove one, the other does not change.
 
 To receive all messages from all segments, add a listener to the channel. The segment listeners get each message first, then the channel listeners. Each listener gets a different copy of the payload:
@@ -159,7 +160,7 @@ Registration channelListener =
 
 `channelListener.close()` removes only this channel listener. The other channel listeners and the segment listeners continue to receive messages. Your subscriptions do not change, and the SDK does not send a message to the server. When you call `close()` again, it has no effect.
 
-`publish(payload)` generates a message id: `msg__java_v`, the SDK version, two underscores, then 32 random lowercase hex digits, for example `msg__java_v0.2.0__4f1c9a0b7d2e43f6a8b5c1d0e9f27364`. A generated id holds only letters, digits, dots and underscores; any other character of the version becomes an underscore, and the double underscores keep the id apart from the ids that the server generates (`msg_{node}_…`). `publish(payload, messageId)` uses yours, exactly as you give it: at least one character, with no CR or LF. The payload is copied before `publish` returns. The future completes once the local socket accepted the bytes: there is no receipt. While the channel reconnects, a publish waits in the queue and is sent after the restored subscriptions, as does a publish still waiting when the connection drops; waiting publishes fail with the error `onError` reports if recovery fails, and with `CANCELLED` on `close()`. Before the first connect completes, and once the channel is failed or closed, `publish` fails with `NOT_CONNECTED`. Publishing joins the segment server-side. A publish over your plan's payload cap still completes, and is refused afterwards with a `MessageSizeLimitError` through `onError`.
+`publish(payload)` generates a message id: `msg__java_v`, the SDK version, two underscores, then 32 random lowercase hex digits, for example `msg__java_v0.2.0__4f1c9a0b7d2e43f6a8b5c1d0e9f27364`. A generated id holds only letters, digits, dots and underscores; any other character of the version becomes an underscore, and the double underscores keep the id apart from the ids that the server generates (`msg_{node}_…`). `publish(payload, messageId)` uses yours, exactly as you give it: at least one character, with no CR or LF. The payload is copied before `publish` returns. The future completes once the local socket accepted the bytes: there is no receipt. While the channel reconnects, a publish waits in the queue and is sent after the restored subscriptions, as does a publish still waiting when the connection drops; waiting publishes fail with the error `onError` reports if recovery fails, and with `CANCELLED` on `close()`. Before the first connect completes, and once the channel is failed or closed, `publish` fails with `NOT_CONNECTED`. A publish does not join the segment. Call `subscribe()` to receive from the segment, also for your own echo. The cap of your plan counts the whole encoded command, not only the payload. A publish over that cap still completes, and the server then refuses it with a `MessageSizeLimitError` through `onError`.
 
 Cancelling the future (`cancel(true)`) withdraws a publish the socket has not started writing. Once it is being written, the future completes with `DELIVERY_UNKNOWN` instead and `cancel` returns false.
 
@@ -306,7 +307,7 @@ The JDK's WebSocket client can miss a connection closed without a close frame ri
 | What             | Value                                                                                       |
 | ---------------- | ------------------------------------------------------------------------------------------- |
 | Outbound command | 2 MiB encoded, refused with `CONFIGURATION` before any write                                |
-| Plan payload cap | 64 KiB free, 128 KiB standard, 512 KiB pro, 1024 KiB prime; enforced by the server          |
+| Plan cap         | 64 KiB free, 128 KiB standard, 512 KiB pro, 1024 KiB prime, for the whole encoded command; enforced by the server |
 | Writer bounds    | 64 commands / 2 MiB not yet written; `publishQueueSize` more waiting, 64 by default         |
 | Rate limits      | pause 1 s plus jitter, at most 31 s; resend the last 2 s, at most 64 publishes, each once   |
 | Quota probe      | after 8 limits in a row: dropped subscriptions retried after 1 min, doubling to 1 h        |

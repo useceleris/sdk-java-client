@@ -3,6 +3,7 @@ package com.useceleris.client;
 import java.io.ByteArrayOutputStream;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,17 +43,17 @@ final class Connection implements WebSocket.Listener {
   @GuardedBy("channel.lock")
   private @Nullable WebSocket socket;
 
-  // Frames handed to the writer and not yet written, the one being written first. They are bounded
-  // by count and bytes, so a maximum-size command always fits an empty writer.
+  // Frames handed to the writer and not yet written, the batch being written first. They are
+  // bounded by count and bytes, so a maximum-size command always fits an empty writer.
   @GuardedBy("channel.lock")
   private final ArrayDeque<OutboundFrame> outbound = new ArrayDeque<>();
 
   @GuardedBy("channel.lock")
   private int outboundBytes;
 
+  // The frames at the front of the writer that the socket is writing as one frame (BATCH-01).
   @GuardedBy("channel.lock")
-  @Nullable
-  OutboundFrame writing;
+  private List<OutboundFrame> writing = List.of();
 
   // closing asks the writer to flush, then perform the closing handshake; broken stops it at once.
   @GuardedBy("channel.lock")
@@ -300,7 +301,7 @@ final class Connection implements WebSocket.Listener {
     for (var frames = outbound.iterator(); frames.hasNext(); ) {
       OutboundFrame frame = frames.next();
 
-      if (frame.publish == publish && frame != writing) {
+      if (frame.publish == publish && !writing.contains(frame)) {
         frames.remove();
         outboundBytes -= frame.data.length;
         removed = true;
@@ -312,9 +313,7 @@ final class Connection implements WebSocket.Listener {
 
   /** Reports whether the socket is writing a frame of the publish. The caller holds the lock. */
   boolean isWriting(QueuedPublish publish) {
-    OutboundFrame current = writing;
-
-    return current != null && current.publish == publish;
+    return writing.stream().anyMatch(frame -> frame.publish == publish);
   } // end method isWriting
 
   /**
@@ -324,33 +323,33 @@ final class Connection implements WebSocket.Listener {
    */
   void pump() {
     WebSocket current;
-    OutboundFrame frame;
+    List<OutboundFrame> batch;
 
     channel.lock.lock();
 
     try {
       current = socket;
 
-      if (current == null || broken || writing != null) {
+      if (current == null || broken || !writing.isEmpty()) {
         return;
       }
 
-      frame = outbound.peek();
+      batch = packBatch();
 
-      if (frame == null) {
+      if (batch.isEmpty()) {
         if (!closing || closeSent) {
           return;
         }
 
         closeSent = true;
       } else {
-        writing = frame;
+        writing = batch;
       }
     } finally {
       channel.lock.unlock();
     }
 
-    if (frame == null) {
+    if (batch.isEmpty()) {
       sendClose(current);
 
       return;
@@ -359,44 +358,90 @@ final class Connection implements WebSocket.Listener {
     CompletableFuture<WebSocket> sent;
 
     try {
-      sent = current.sendBinary(ByteBuffer.wrap(frame.data), true);
+      sent = current.sendBinary(ByteBuffer.wrap(encodeBatch(batch)), true);
     } catch (RuntimeException failure) {
       sent = CompletableFuture.failedFuture(failure);
     }
 
     var unused =
         sent.whenCompleteAsync(
-            (ignored, failure) -> writeCompleted(frame, failure), channel.executor);
+            (ignored, failure) -> writeCompleted(batch, failure), channel.executor);
   } // end method pump
 
-  private void writeCompleted(OutboundFrame frame, @Nullable Throwable failure) {
+  /**
+   * The frames at the front of the writer that go out together, in order: at most {@link
+   * Constants#MAXIMUM_BATCH_COMMANDS} of them, within {@link Constants#MAXIMUM_BATCH_BYTES} with
+   * the array header. A first frame larger than that goes alone. The caller holds the lock.
+   */
+  private List<OutboundFrame> packBatch() {
+    List<OutboundFrame> batch = new ArrayList<>();
+    int size = 0;
+
+    for (OutboundFrame frame : outbound) {
+      int next = size + frame.data.length;
+      // The array header is "*", the count and LF.
+      int frameLength = 2 + String.valueOf(batch.size() + 1).length() + next;
+
+      if (batch.size() == Constants.MAXIMUM_BATCH_COMMANDS
+          || (!batch.isEmpty() && frameLength > Constants.MAXIMUM_BATCH_BYTES)) {
+        break;
+      }
+
+      batch.add(frame);
+      size = next;
+    }
+
+    return batch;
+  } // end method packBatch
+
+  /** A single command as it is, several in a {@code *N} array. */
+  private static byte[] encodeBatch(List<OutboundFrame> batch) {
+    if (batch.size() == 1) {
+      return batch.get(0).data;
+    }
+
+    var data = new ByteArrayOutputStream();
+    data.writeBytes(("*" + batch.size() + "\n").getBytes(StandardCharsets.US_ASCII));
+
+    for (OutboundFrame frame : batch) {
+      data.writeBytes(frame.data);
+    }
+
+    return data.toByteArray();
+  } // end method encodeBatch
+
+  private void writeCompleted(List<OutboundFrame> batch, @Nullable Throwable failure) {
     channel.lock.lock();
 
     try {
-      writing = null;
+      writing = List.of();
 
-      if (outbound.peek() == frame) {
-        outbound.poll();
-        outboundBytes -= frame.data.length;
+      for (OutboundFrame frame : batch) {
+        if (outbound.peek() == frame) {
+          outbound.poll();
+          outboundBytes -= frame.data.length;
+        }
       }
 
-      QueuedPublish publish = frame.publish;
-
       if (failure != null) {
-        if (publish != null) {
-          publish.settle(
-              new CelerisException(
-                  ErrorCode.DELIVERY_UNKNOWN,
-                  "WebSocket send failed after the command was handed over, so it may or may not"
-                      + " have been sent."));
+        for (OutboundFrame frame : batch) {
+          if (frame.publish != null) {
+            frame.publish.settle(
+                new CelerisException(
+                    ErrorCode.DELIVERY_UNKNOWN,
+                    "WebSocket send failed after the command was handed over, so it may or may"
+                        + " not have been sent."));
+          }
         }
 
         // A write the socket refuses leaves the server's view of this connection unknown, so the
         // socket is replaced and reconnecting restores every subscription (RESEND-01).
         channel.connectionFailed(this, channel.timers.monotonicNanos());
       } else {
-        if (publish != null) {
-          publish.settle(null);
+        for (OutboundFrame frame : batch) {
+          if (frame.publish != null) {
+            frame.publish.settle(null);
+          }
         }
 
         if (channel.connection == this) {
@@ -419,16 +464,14 @@ final class Connection implements WebSocket.Listener {
    * that write settles it. The caller holds the lock.
    */
   List<QueuedPublish> takeUnstarted() {
-    OutboundFrame current = writing;
-    QueuedPublish beingWritten = current == null ? null : current.publish;
     List<QueuedPublish> unstarted = new ArrayList<>();
 
     for (OutboundFrame frame : outbound) {
       QueuedPublish publish = frame.publish;
 
-      if (frame != current
+      if (!writing.contains(frame)
           && publish != null
-          && publish != beingWritten
+          && !isWriting(publish)
           && !publish.settled()
           && !unstarted.contains(publish)) {
         publish.connection = null;
@@ -437,12 +480,8 @@ final class Connection implements WebSocket.Listener {
     }
 
     outbound.clear();
-    outboundBytes = 0;
-
-    if (current != null) {
-      outbound.add(current);
-      outboundBytes = current.data.length;
-    }
+    outbound.addAll(writing);
+    outboundBytes = writing.stream().mapToInt(frame -> frame.data.length).sum();
 
     return unstarted;
   } // end method takeUnstarted

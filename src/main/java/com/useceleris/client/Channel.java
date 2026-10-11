@@ -994,6 +994,14 @@ public final class Channel implements AutoCloseable {
       queue.receiveRateLimit();
     }
 
+    // A publish refused for its size names itself by message id; the other commands in its frame
+    // ran (BATCH-01).
+    if (ServerErrorException.MESSAGE_SIZE_LIMIT_ERROR.equals(error.type())
+        && "PUB".equals(error.subType())
+        && error.resource() instanceof String messageId) {
+      queue.forgetRefused(messageId);
+    }
+
     queueError(serverError);
   } // end method receiveServerError
 
@@ -1146,7 +1154,8 @@ public final class Channel implements AutoCloseable {
         future.settle(null, encodeFailure);
       } else {
         try {
-          QueuedPublish publish = queue.publish(segmentId, Objects.requireNonNull(data), future);
+          QueuedPublish publish =
+              queue.publish(segmentId, messageId, Objects.requireNonNull(data), future);
           future.attach(() -> cancelPublish(publish));
         } catch (CelerisException failure) {
           future.settle(null, failure);

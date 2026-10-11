@@ -91,6 +91,8 @@ class RateLimitTest {
             publishFrame("lobby", "m-1", "a"),
             publishFrame("lobby", "m-2", "b")),
         socket.commands());
+    // The resend goes out packed in one frame.
+    assertEquals(1, socket.frames().size());
   } // end method rateLimitPausesThenResendsSubscriptionsBeforePublishes
 
   @Test

@@ -151,9 +151,50 @@ final class FakeWebSocket implements WebSocket {
     answeringPings = true;
   } // end method answerPings
 
-  synchronized List<String> commands() {
+  /** Every write, as written. */
+  synchronized List<String> frames() {
     return List.copyOf(written);
+  } // end method frames
+
+  /** Every command written, in order, with each {@code *N} frame split into its commands. */
+  synchronized List<String> commands() {
+    List<String> commands = new ArrayList<>();
+
+    for (String frame : written) {
+      commands.addAll(splitFrame(frame));
+    }
+
+    return commands;
   } // end method commands
+
+  private static List<String> splitFrame(String frame) {
+    if (!frame.startsWith("*")) {
+      return List.of(frame);
+    }
+
+    List<String> commands = new ArrayList<>();
+    int offset = frame.indexOf('\n') + 1;
+
+    while (offset < frame.length()) {
+      int start = offset;
+      offset = frame.indexOf('\n', offset) + 1;
+
+      // Fields follow the command name until the next command starts.
+      while (offset < frame.length() && frame.charAt(offset) != '@') {
+        int lineEnd = frame.indexOf('\n', offset);
+        String field = frame.substring(offset, lineEnd);
+        offset = lineEnd + 1;
+
+        if (field.startsWith("$") && !field.equals("$-1")) {
+          offset += Integer.parseInt(field.substring(1)) + 1;
+        }
+      }
+
+      commands.add(frame.substring(start, offset));
+    }
+
+    return commands;
+  } // end method splitFrame
 
   synchronized void clearCommands() {
     written.clear();

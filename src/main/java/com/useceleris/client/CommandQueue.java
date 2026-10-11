@@ -78,7 +78,8 @@ final class CommandQueue {
   } // end method queueInterest
 
   /** Queues a publish, which settles once written to the socket. */
-  QueuedPublish publish(String segmentId, byte[] data, OperationFuture<Void> future) {
+  QueuedPublish publish(
+      String segmentId, String messageId, byte[] data, OperationFuture<Void> future) {
     if (publishes.size() >= channel.publishQueueSize) {
       throw new CelerisException(
           ErrorCode.BACKPRESSURE,
@@ -88,7 +89,7 @@ final class CommandQueue {
     }
 
     sequence++;
-    QueuedPublish publish = new QueuedPublish(segmentId, data, sequence, future);
+    QueuedPublish publish = new QueuedPublish(segmentId, messageId, data, sequence, future);
     publishes.add(publish);
     drain();
 
@@ -100,6 +101,14 @@ final class CommandQueue {
     publishes.remove(publish);
     recentPublishes.removeIf(sent -> sent.publish() == publish);
   } // end method withdraw
+
+  /**
+   * Drops the publishes the server refused for their size from the resend record, so a later rate
+   * limit does not send, and bill, them again.
+   */
+  void forgetRefused(String messageId) {
+    recentPublishes.removeIf(sent -> sent.publish().messageId.equals(messageId));
+  } // end method forgetRefused
 
   /** Hands over a command that is never queued or resent, such as a presence query. */
   void sendNow(Connection connection, byte[] data) {

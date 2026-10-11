@@ -13,7 +13,7 @@ final class Constants {
   // only discards data.
   //
   // The command bound is the server's transport ceiling: above it no plan can accept a command.
-  // Each plan's own, smaller payload cap is enforced by the server and surfaces as a
+  // Each plan's own, smaller command cap is enforced by the server and surfaces as a
   // MessageSizeLimitError server error.
   static final int MAXIMUM_COMMAND_BYTES = 2 * 1024 * 1024;
 
@@ -24,6 +24,13 @@ final class Constants {
   // Bounds the writer, the publishes kept for a rate-limit resend, and, as publishQueueSize's
   // default, the publishes waiting for the writer.
   static final int MAXIMUM_PENDING_COMMANDS = 64;
+
+  // Batching (BATCH-01). The writer sends the frames waiting for it in one `*N` frame of at most
+  // this many commands and bytes, header included. A command larger than the byte bound goes
+  // alone. The server refuses an array of more than 16 commands.
+  static final int MAXIMUM_BATCH_COMMANDS = 16;
+
+  static final int MAXIMUM_BATCH_BYTES = 64 * 1024;
 
   // Outbound recovery (RESEND-01). A rate limit is reported without saying which frame it dropped,
   // so whatever went out recently is resent.

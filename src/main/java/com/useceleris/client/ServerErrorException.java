@@ -24,7 +24,7 @@ public final class ServerErrorException extends RuntimeException {
   /** A per-second, per-hour, per-month or per-connection message limit was exceeded. */
   public static final String RATE_LIMIT_ERROR = "RateLimitError";
 
-  /** A publish exceeded the plan's payload cap. */
+  /** A command exceeded the plan's cap on the whole encoded command. */
   public static final String MESSAGE_SIZE_LIMIT_ERROR = "MessageSizeLimitError";
 
   /** A fault inside the server, such as a failed presence read. */

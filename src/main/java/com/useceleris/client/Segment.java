@@ -91,7 +91,7 @@ public final class Segment {
    * queue ({@code publishQueueSize} publishes, 64 by default) is already full, and with {@link
    * ErrorCode#DELIVERY_UNKNOWN} when the socket failed mid-write; such a publish is never resent.
    * Cancelling the future withdraws a publish the socket has not started writing. A publish over
-   * the plan's payload cap still succeeds here and is refused afterwards with a
+   * the plan's command cap still succeeds here and is refused afterwards with a
    * MessageSizeLimitError through {@link ChannelEventHandler#onError}.
    *
    * @param payload the bytes to publish, possibly empty

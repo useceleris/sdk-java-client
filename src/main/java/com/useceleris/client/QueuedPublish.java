@@ -5,6 +5,7 @@ package com.useceleris.client;
  */
 final class QueuedPublish {
   final String segmentId;
+  final String messageId;
   final byte[] data;
 
   /** Its place in the order commands were queued in. */
@@ -21,8 +22,14 @@ final class QueuedPublish {
    */
   @Nullable Connection connection;
 
-  QueuedPublish(String segmentId, byte[] data, long sequence, OperationFuture<Void> future) {
+  QueuedPublish(
+      String segmentId,
+      String messageId,
+      byte[] data,
+      long sequence,
+      OperationFuture<Void> future) {
     this.segmentId = segmentId;
+    this.messageId = messageId;
     this.data = data;
     this.sequence = sequence;
     this.future = future;

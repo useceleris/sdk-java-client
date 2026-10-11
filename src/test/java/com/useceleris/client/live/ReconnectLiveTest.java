@@ -302,31 +302,6 @@ final class ReconnectLiveTest {
   } // end method recoversEveryMissedMessageAfterALongerOutageWithFailedAttempts
 
   @Test
-  void doesNotRejoinASegmentThatTheConnectionJoinedOnlyByPublishing() throws Exception {
-    Setup setup = setUp("reconnect-publish-join");
-    Channel receiver = setup.receiver();
-    Channel publisher = setup.publisher();
-    Recorder<Delivery> team = collect(receiver.segment("team"));
-    Recorder<Delivery> lobby = collect(receiver.defaultSegment());
-    await(receiver.connect(), "connect through the proxy");
-    publish(receiver, "team", "joining");
-    settle();
-    publish(publisher, "team", "before");
-    arrival(team, "before", DELIVERY_TIMEOUT);
-
-    setup.startOutage();
-    setup.endOutage();
-    settle();
-
-    publish(publisher, "team", "after");
-    publish(publisher, "default", "control");
-    arrival(lobby, "control", DELIVERY_TIMEOUT);
-    pause(Duration.ofMillis(2500));
-
-    assertEquals(List.of("before"), texts(team));
-  } // end method doesNotRejoinASegmentThatTheConnectionJoinedOnlyByPublishing
-
-  @Test
   void announcesTheNewConnectionAndRestoresItsPresenceSubscriptionAfterAReconnect()
       throws Exception {
     Setup setup = setUp("reconnect-presence");

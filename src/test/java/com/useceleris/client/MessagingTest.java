@@ -599,9 +599,9 @@ class MessagingTest {
         runtime.socket(),
         messageFrame("chat", "id-1", "hi"),
         messageFrame("default", "id-2", "yo"),
-        messageFrame("joined-by-publish", "id-3", "ok"));
+        messageFrame("no-listener", "id-3", "ok"));
 
-    assertEquals(List.of("chat:hi", "default:yo", "joined-by-publish:ok"), seen.all());
+    assertEquals(List.of("chat:hi", "default:yo", "no-listener:ok"), seen.all());
   } // end method channelListenerReceivesEverySegmentWithOrWithoutSegmentListeners
 
   @Test

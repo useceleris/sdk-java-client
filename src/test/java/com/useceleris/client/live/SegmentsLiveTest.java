@@ -15,6 +15,7 @@ import static com.useceleris.client.live.LiveSupport.withText;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.useceleris.client.Channel;
+import com.useceleris.client.ChannelState;
 import com.useceleris.client.Payloads;
 import com.useceleris.client.PresenceConnection;
 import com.useceleris.client.Registration;
@@ -25,6 +26,7 @@ import com.useceleris.client.live.LiveSupport.Delivery;
 import com.useceleris.client.live.LiveSupport.Recorder;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -73,6 +75,10 @@ final class SegmentsLiveTest {
   private void publish(String segmentId, String body) throws InterruptedException {
     await(publisher.segment(segmentId).publish(Payloads.text(body)), "publishing " + body);
   } // end method publish
+
+  private void publishFromReceiver(String segmentId, String body) throws InterruptedException {
+    await(receiver.segment(segmentId).publish(Payloads.text(body)), "publishing " + body);
+  } // end method publishFromReceiver
 
   /**
    * A negative check needs proof the connection was live: a control message on the default segment,
@@ -226,19 +232,60 @@ final class SegmentsLiveTest {
     assertEquals(List.of("one", "two"), texts(kept));
   } // end method keepsOtherListenersAndTheSubscriptionWhenOneListenerStops
 
-  // ---- Joins the server makes without a message subscription (SEG-01) ----
+  // ---- A publish is not a membership: only a subscription receives (SEG-01) ----
 
   @Test
-  void deliversToASegmentJoinedByPublishing() throws Exception {
-    pair("publish-join");
+  void deliversNothingToAConnectionThatOnlyPublishesUntilItSubscribes() throws Exception {
+    pair("publish-no-join");
     Recorder<Delivery> chat = collect(receiver.segment("chat"));
-    await(receiver.segment("chat").publish(Payloads.text("joining")), "publishing joining");
+    Recorder<Delivery> publisherChat = collect(publisher.segment("chat"));
+    publisher.segment("chat").subscribe();
     settle();
 
-    publishAndAwait(chat, "chat", "after");
+    // The subscribed peer receives the publish, which proves that the publish ran on the server.
+    publishFromReceiver("chat", "from-receiver");
+    publisherChat.await(withText("from-receiver"), "\"from-receiver\" on chat", DELIVERY_TIMEOUT);
+    publish("chat", "unheard");
+    confirmQuiet();
+    assertEquals(List.of(), texts(chat));
 
-    assertEquals(List.of("after"), texts(chat));
-  } // end method deliversToASegmentJoinedByPublishing
+    receiver.segment("chat").subscribe();
+    settle();
+    publishAndAwait(chat, "chat", "heard");
+
+    assertEquals(List.of("heard"), texts(chat));
+  } // end method deliversNothingToAConnectionThatOnlyPublishesUntilItSubscribes
+
+  @Test
+  void givesNoEchoOnANamedSegmentBeforeASubscription() throws Exception {
+    pair("publish-no-echo", claims().withAllowEcho());
+    Recorder<Delivery> chat = collect(receiver.segment("chat"));
+
+    publishFromReceiver("chat", "unheard");
+    confirmQuiet();
+    assertEquals(List.of(), texts(chat));
+
+    receiver.segment("chat").subscribe();
+    settle();
+    publishFromReceiver("chat", "echoed");
+    chat.await(withText("echoed"), "\"echoed\" on chat", DELIVERY_TIMEOUT);
+
+    assertEquals(List.of("echoed"), texts(chat));
+  } // end method givesNoEchoOnANamedSegmentBeforeASubscription
+
+  @Test
+  void doesNotListAConnectionThatOnlyPublishesInThePresenceOfTheSegment() throws Exception {
+    pair("publish-no-presence");
+    Recorder<Delivery> publisherChat = collect(publisher.segment("chat"));
+    publisher.segment("chat").subscribe();
+    settle();
+
+    publishFromReceiver("chat", "from-receiver");
+    publisherChat.await(withText("from-receiver"), "\"from-receiver\" on chat", DELIVERY_TIMEOUT);
+    pause(Duration.ofSeconds(3));
+
+    assertEquals(1, connectionsIn("chat").size());
+  } // end method doesNotListAConnectionThatOnlyPublishesInThePresenceOfTheSegment
 
   // Watching presence is not membership: it neither joins nor holds.
   @Test
@@ -263,52 +310,36 @@ final class SegmentsLiveTest {
     assertEquals(List.of("one"), texts(chat));
   } // end method neverJoinsOrHoldsASegmentForAPresenceSubscription
 
-  @Test
-  void leavesASegmentJoinedByPublishingOnTheLastCancel() throws Exception {
-    pair("publish-leave");
-    Recorder<Delivery> chat = collect(receiver.segment("chat"));
-    await(receiver.segment("chat").publish(Payloads.text("joining")), "publishing joining");
-    Subscription membership = receiver.segment("chat").subscribe();
-    settle();
-
-    membership.cancel();
-    settle();
-    publish("chat", "late");
-    confirmQuiet();
-
-    assertEquals(List.of(), texts(chat));
-  } // end method leavesASegmentJoinedByPublishingOnTheLastCancel
-
-  // ---- Token permissions: publishing joins, but read access is checked at the join ----
+  // ---- Token permissions: write access publishes, and read access subscribes ----
 
   @Test
-  void receivesAfterPublishingWithAReadWriteToken() throws Exception {
-    pair("publish-read-write", claims().withPermission(true, true));
-    Recorder<Delivery> chat = collect(receiver.segment("chat"));
-    await(receiver.segment("chat").publish(Payloads.text("joining")), "publishing joining");
-    settle();
-
-    publishAndAwait(chat, "chat", "after");
-
-    assertEquals(List.of("after"), texts(chat));
-  } // end method receivesAfterPublishingWithAReadWriteToken
-
-  @Test
-  void receivesNothingAfterPublishingWithAWriteOnlyToken() throws Exception {
+  void refusesAWriteOnlyTokensSubscriptionAndStillDeliversItsPublish() throws Exception {
     pair("publish-write-only", claims().withPermission(false, true));
     Recorder<Delivery> chat = collect(receiver.segment("chat"));
     Recorder<Delivery> publisherChat = collect(publisher.segment("chat"));
+    Recorder<RuntimeException> errors = collectErrors(receiver);
     publisher.segment("chat").subscribe();
     settle();
 
-    // The publish lands, which proves the write-only connection is up.
-    await(receiver.segment("chat").publish(Payloads.text("joining")), "publishing joining");
-    publisherChat.await(withText("joining"), "\"joining\" on chat", DELIVERY_TIMEOUT);
+    receiver.segment("chat").subscribe();
+    errors.await(
+        failure ->
+            failure instanceof ServerErrorException serverError
+                && serverError.type().equals(ServerErrorException.PERMISSION_DENIED_ERROR)
+                && serverError.subType().equals(Optional.of("SUB"))
+                && serverError.resource().equals(Optional.of("chat")),
+        "the subscription denial",
+        DELIVERY_TIMEOUT);
+
+    // The refused token still publishes, and it receives nothing.
+    publishFromReceiver("chat", "written");
+    publisherChat.await(withText("written"), "\"written\" on chat", DELIVERY_TIMEOUT);
     publish("chat", "unheard");
     pause(Duration.ofMillis(2500));
 
     assertEquals(List.of(), texts(chat));
-  } // end method receivesNothingAfterPublishingWithAWriteOnlyToken
+    assertEquals(ChannelState.CONNECTED, receiver.state());
+  } // end method refusesAWriteOnlyTokensSubscriptionAndStillDeliversItsPublish
 
   @Test
   void refusesAReadOnlyTokensPublishAndDeliversOnceSubscribed() throws Exception {
@@ -396,13 +427,14 @@ final class SegmentsLiveTest {
         .events()
         .onMessage((payload, metadata) -> seen.accept(metadata.segmentId() + ":" + text(payload)));
 
-    await(receiver.segment("joined").publish(Payloads.text("joining")), "publishing joining");
+    // The segment has a subscription and no segment listener.
+    receiver.segment("unlistened").subscribe();
     settle();
 
-    publish("joined", "x");
+    publish("unlistened", "x");
     publish("default", "y");
     waitUntil(() -> seen.count() >= 2, "both channel-wide deliveries", DELIVERY_TIMEOUT);
 
-    assertEquals(List.of("default:y", "joined:x"), seen.all().stream().sorted().toList());
+    assertEquals(List.of("default:y", "unlistened:x"), seen.all().stream().sorted().toList());
   } // end method channelListenerCatchesDeliveriesNoSegmentListenerAskedFor
 } // end class SegmentsLiveTest

@@ -198,14 +198,25 @@ final class MessagingLiveTest {
   } // end method reportsAReadOnlyTokensPublishAsPermissionDenied
 
   @Test
-  void keepsAWriteOnlyTokenPublishingWhileReceivingNothing() throws Exception {
+  void keepsAWriteOnlyTokenPublishingWhileItsSubscriptionIsRefused() throws Exception {
     String reference = uniqueChannelReference("writeonly");
     Channel writeOnly = live.connectedChannel(reference, claims().withPermission(false, true));
     Channel reader = live.connectedChannel(reference);
+    Recorder<RuntimeException> errors = collectErrors(writeOnly);
     Recorder<Delivery> writerSaw = collect(writeOnly.segment("chat"));
     Recorder<Delivery> readerSaw = collect(reader.segment("chat"));
     writeOnly.segment("chat").subscribe();
     reader.segment("chat").subscribe();
+
+    // A subscription needs read access, so the server refuses this one.
+    ServerErrorException denial =
+        (ServerErrorException)
+            errors.await(
+                serverErrorOfType(ServerErrorException.PERMISSION_DENIED_ERROR),
+                "the subscription denial",
+                DELIVERY_TIMEOUT);
+    assertEquals(Optional.of("SUB"), denial.subType());
+    assertEquals(Optional.of("chat"), denial.resource());
     settle();
 
     await(writeOnly.segment("chat").publish(Payloads.text("one-way")), "publish");
@@ -213,7 +224,8 @@ final class MessagingLiveTest {
     readerSaw.await(withText("one-way"), "delivery to the reader", DELIVERY_TIMEOUT);
     settle();
     assertEquals(List.of(), writerSaw.all(), "a write-only token received");
-  } // end method keepsAWriteOnlyTokenPublishingWhileReceivingNothing
+    assertEquals(ChannelState.CONNECTED, writeOnly.state());
+  } // end method keepsAWriteOnlyTokenPublishingWhileItsSubscriptionIsRefused
 
   /** RES-05: subscriptions the server drops under its rate limit recover. */
   @Test

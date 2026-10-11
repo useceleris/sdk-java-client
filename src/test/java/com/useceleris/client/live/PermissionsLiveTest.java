@@ -84,14 +84,16 @@ final class PermissionsLiveTest {
   } // end method letsAReadOnlySegmentReceiveAndRefusesItsPublish
 
   @Test
-  void letsAWriteOnlySegmentPublishAndReceiveNothing() throws Exception {
+  void letsAWriteOnlySegmentPublishAndRefusesItsSubscription() throws Exception {
     String reference = uniqueChannelReference("perm-write");
     Channel reader = live.connectedChannel(reference);
     Channel limited = live.connectedChannel(reference, SEGMENT_PERMISSIONS);
+    Recorder<RuntimeException> errors = collectErrors(limited);
     Recorder<Delivery> writeonly = collect(limited.segment("writeonly"));
     Recorder<Delivery> readerSaw = collect(reader.segment("writeonly"));
     reader.segment("writeonly").subscribe();
     limited.segment("writeonly").subscribe();
+    denial(errors, "SUB", "writeonly");
     settle();
 
     await(limited.segment("writeonly").publish(Payloads.text("from-limited")), "publish");
@@ -101,7 +103,26 @@ final class PermissionsLiveTest {
     pause(Duration.ofMillis(2500));
 
     assertEquals(List.of(), texts(writeonly));
-  } // end method letsAWriteOnlySegmentPublishAndReceiveNothing
+    assertEquals(ChannelState.CONNECTED, limited.state());
+  } // end method letsAWriteOnlySegmentPublishAndRefusesItsSubscription
+
+  @Test
+  void replaysAWriteOnlyPublishToALaterSubscriber() throws Exception {
+    String reference = uniqueChannelReference("perm-write-replay");
+    Channel limited = live.connectedChannel(reference, SEGMENT_PERMISSIONS);
+    Recorder<Delivery> writeonly = collect(limited.segment("writeonly"));
+    // No connection is in the segment when the write-only token publishes.
+    await(limited.segment("writeonly").publish(Payloads.text("kept")), "publish");
+    settle();
+
+    Channel reader = live.connectedChannel(reference, claims().withReplay());
+    Recorder<Delivery> replayed = collect(reader.segment("writeonly"));
+    reader.segment("writeonly").subscribe();
+    replayed.await(withText("kept"), "the replay of the write-only publish", DELIVERY_TIMEOUT);
+
+    assertEquals(List.of(), texts(writeonly));
+    assertEquals(ChannelState.CONNECTED, limited.state());
+  } // end method replaysAWriteOnlyPublishToALaterSubscriber
 
   @Test
   void refusesPresenceOnASegmentWithoutReadAccess() throws Exception {

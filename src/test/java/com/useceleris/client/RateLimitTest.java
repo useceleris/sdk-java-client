@@ -293,7 +293,7 @@ class RateLimitTest {
 
     runtime.advance(Duration.ofSeconds(1));
 
-    // Publishing joins the segment, so the UNSUB has to follow it.
+    // The commands for one segment keep their call order, so the UNSUB follows the publish.
     assertSucceeded(published);
     assertEquals(
         List.of(publishFrame("chat", "m-1", "x"), "@UNSUB\n$4\nchat\n"), socket.commands());

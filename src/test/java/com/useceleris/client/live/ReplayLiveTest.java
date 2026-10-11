@@ -227,20 +227,27 @@ final class ReplayLiveTest {
   } // end method replaysEachSegmentsBacklogWhenThatSegmentIsJoined
 
   @Test
-  void replaysToASegmentJoinedByPublishing() throws Exception {
-    String reference = uniqueChannelReference("replay-publish-join");
+  void startsNoReplayWithAPublishAndReplaysOnTheSubscription() throws Exception {
+    String reference = uniqueChannelReference("replay-publish-no-join");
     Channel publisher = live.connectedChannel(reference);
+    // A member keeps the segment, and its backlog, on the server.
+    publisher.segment("history").subscribe();
+    settle();
     publishAll(publisher, "history", List.of("h1"));
     settle();
 
     Channel receiver = replayingChannel(reference);
     Recorder<Delivery> history = collect(receiver.segment("history"));
-    publishAll(receiver, "history", List.of("joining"));
+    publishAll(receiver, "history", List.of("no-join"));
+    pause(Duration.ofMillis(2_500));
+    assertEquals(List.of(), texts(history));
+
+    receiver.segment("history").subscribe();
     arrival(history, "h1");
     settle();
 
-    assertEquals(List.of("h1"), texts(history));
-  } // end method replaysToASegmentJoinedByPublishing
+    assertTrue(texts(history).contains("h1"), texts(history).toString());
+  } // end method startsNoReplayWithAPublishAndReplaysOnTheSubscription
 
   @Test
   void recoversWhatARejoinMissedAndDropsWhatItAlreadyDelivered() throws Exception {

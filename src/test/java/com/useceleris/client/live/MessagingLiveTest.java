@@ -113,19 +113,20 @@ final class MessagingLiveTest {
   } // end method deliversOnTheDefaultSegmentWithoutSubscribing
 
   /**
-   * Needs the qualification app on a plan with message_size_limit_in_kb of at least 1024. Framed,
-   * the full payload is larger than 1 MiB (LIMIT-01).
+   * Needs the qualification app on a plan with message_size_limit_in_kb of at least 1024. The cap
+   * counts the whole encoded command, so the larger payload is the cap less its framing; its
+   * delivery is larger than 1 MiB (LIMIT-01).
    */
-  @ParameterizedTest(name = "{0} KiB")
-  @ValueSource(ints = {100, 1024})
-  void roundTripsLargeBinaryPayloads(int kibibytes) throws Exception {
+  @ParameterizedTest(name = "{0} bytes")
+  @ValueSource(ints = {100 * 1024, 1024 * 1024 - 96})
+  void roundTripsLargeBinaryPayloads(int size) throws Exception {
     String reference = uniqueChannelReference("large");
     Channel publisher = live.connectedChannel(reference);
     Channel receiver = live.connectedChannel(reference);
     Recorder<Delivery> received = collect(receiver.segment("bulk"));
     receiver.segment("bulk").subscribe();
     settle();
-    byte[] payload = patterned(kibibytes * 1024);
+    byte[] payload = patterned(size);
 
     await(publisher.segment("bulk").publish(payload), "publish");
 
@@ -399,12 +400,15 @@ final class MessagingLiveTest {
         delivery.metadata().toString());
   } // end method roundTripsAnEmptyPayload
 
+  /**
+   * The cap counts the command's framing, so a payload of the cap itself makes a command over it.
+   */
   @Test
-  void refusesAPayloadOneByteOverThe1024KibPlanCap() throws Exception {
-    Channel channel = live.connectedChannel(uniqueChannelReference("cap-plus-one"));
+  void refusesAFull1024KibPayload() throws Exception {
+    Channel channel = live.connectedChannel(uniqueChannelReference("cap-full"));
     Recorder<RuntimeException> errors = collectErrors(channel);
 
-    await(channel.segment("bulk").publish(new byte[1024 * 1024 + 1]), "publish");
+    await(channel.segment("bulk").publish(new byte[1024 * 1024]), "publish");
 
     RuntimeException rejection =
         errors.await(
@@ -413,7 +417,7 @@ final class MessagingLiveTest {
             Duration.ofSeconds(20));
     assertTrue(rejection.getMessage().contains("size limit = 1024 KB"), rejection.getMessage());
     assertEquals(ChannelState.CONNECTED, channel.state());
-  } // end method refusesAPayloadOneByteOverThe1024KibPlanCap
+  } // end method refusesAFull1024KibPayload
 
   @Test
   void deliversAPacedBurstOf50MessagesInPublishOrderOneTimeEach() throws Exception {
@@ -450,4 +454,58 @@ final class MessagingLiveTest {
 
     assertEquals(50, messageIds.size(), received.all().toString());
   } // end method deliversAPacedBurstOf50MessagesInPublishOrderOneTimeEach
+
+  @Test
+  void refusesOverCapPublishesInABurstByMessageIdAndDeliversTheRestInOrder() throws Exception {
+    String reference = uniqueChannelReference("batch");
+    Channel publisher = live.connectedChannel(reference);
+    Channel receiver = live.connectedChannel(reference);
+    Recorder<RuntimeException> errors = collectErrors(publisher);
+    Recorder<Delivery> received = collect(receiver.segment("chat"));
+    receiver.segment("chat").subscribe();
+    settle();
+    List<String> bodies = new ArrayList<>();
+
+    for (int index = 0; index < 20; index++) {
+      bodies.add("b" + index);
+    }
+
+    // Publishes queue while the writer sends the first over-cap one, so it packs the ones behind
+    // it (BATCH-01).
+    Segment chat = publisher.segment("chat");
+    byte[] overCap = new byte[1024 * 1024 + 1];
+    List<CompletableFuture<Void>> published = new ArrayList<>();
+    published.add(chat.publish(overCap, "too-big-1"));
+    published.add(chat.publish(overCap, "too-big-2"));
+
+    for (String body : bodies) {
+      published.add(chat.publish(Payloads.text(body)));
+    }
+
+    await(CompletableFuture.allOf(published.toArray(CompletableFuture[]::new)), "the burst");
+    received.await(withText("b19"), "the last message of the burst", Duration.ofSeconds(30));
+    settle();
+
+    assertEquals(bodies, texts(received));
+    assertEquals(
+        20,
+        received.all().stream()
+            .map(delivery -> delivery.metadata().messageId())
+            .distinct()
+            .count());
+
+    List<List<Object>> refusals =
+        errors.all().stream()
+            .map(ServerErrorException.class::cast)
+            .map(
+                error ->
+                    List.<Object>of(
+                        error.type(), error.subType().orElse(""), error.resource().orElse("")))
+            .toList();
+    assertEquals(
+        List.of(
+            List.of(ServerErrorException.MESSAGE_SIZE_LIMIT_ERROR, "PUB", "too-big-1"),
+            List.of(ServerErrorException.MESSAGE_SIZE_LIMIT_ERROR, "PUB", "too-big-2")),
+        refusals);
+  } // end method refusesOverCapPublishesInABurstByMessageIdAndDeliversTheRestInOrder
 } // end class MessagingLiveTest

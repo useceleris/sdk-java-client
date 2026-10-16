@@ -64,7 +64,7 @@ final class Constants {
   // artifact's; a test keeps it equal to pom.xml, and `make version` sets both.
   static final String SDK_LANGUAGE = "java";
 
-  static final String SDK_VERSION = "0.1.0-SNAPSHOT";
+  static final String SDK_VERSION = "1.0.0";
 
   // Decoder bounds. These limit parsing work and recursion, not message size; no legitimate server
   // message approaches them.

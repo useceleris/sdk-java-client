@@ -56,11 +56,28 @@ The workflow rejects versions ending in `-SNAPSHOT` before it starts the CI
 matrix or an upload. Maven Central supports snapshot uploads, but snapshots are
 mutable, skip release validation and are not Maven Central releases.
 
-Development snapshots may be published locally from `main` by a developer with
-the required Central Portal token and GPG key. They are mutable development
-artifacts and do not require Portal approval. `release.yml` never publishes
-them: only a reviewed, final version on `release` may pass through the release
-workflow and reach the manual Portal approval step.
+## Snapshot releases from `main`
+
+Development work stays on `main` at a version ending in `-SNAPSHOT`. A
+developer may publish that snapshot locally from `main` when consumers need to
+test an unreleased build:
+
+```sh
+git switch main
+git pull --ff-only
+./mvnw -Prelease clean deploy
+```
+
+This needs the developer's local Central Portal token and GPG key, configured
+as described in [RELEASING.md](../RELEASING.md). The Central Maven plugin sends
+snapshot versions to the snapshot repository. They are mutable development
+artifacts, need no Portal approval, and must never receive a release tag.
+`make publish` deliberately refuses snapshot versions.
+
+`release.yml` never publishes snapshots. To create a production release, make
+a release-preparation branch from `main`, set a final version, and merge its PR
+into `release`. Only that reviewed, non-SNAPSHOT `release` commit may pass
+through the workflow and reach the manual Portal approval step.
 
 ## Publish and tag
 
